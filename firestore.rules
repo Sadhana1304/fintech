@@ -1,0 +1,175 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string
+    //   - email: string (required)
+    //   - photoURL: string
+    //   - currency: string
+    //   - createdAt: timestamp
+    //
+    // Collection: transactions
+    // Document ID: {transactionId}
+    // Fields:
+    //   - uid: string (required)
+    //   - amount: number (required)
+    //   - type: string (required, 'income' or 'expense')
+    //   - category: string (required)
+    //   - description: string
+    //   - date: timestamp (required)
+    //   - createdAt: timestamp
+    //
+    // Collection: budgets
+    // Document ID: {budgetId}
+    // Fields:
+    //   - uid: string (required)
+    //   - category: string (required)
+    //   - amount: number (required)
+    //   - month: number (required, 1-12)
+    //   - year: number (required)
+    //   - createdAt: timestamp
+    //
+    // Collection: categories
+    // Document ID: {categoryId}
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required)
+    //   - color: string (required)
+    //   - type: string (required, 'income' or 'expense')
+    //   - createdAt: timestamp
+    //
+    // Collection: savingsGoals
+    // Document ID: {goalId}
+    // Fields:
+    //   - uid: string (required)
+    //   - name: string (required)
+    //   - targetAmount: number (required)
+    //   - currentAmount: number (required)
+    //   - deadline: timestamp
+    //   - createdAt: timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isRequestOwner() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "bashokkumar@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.email is string && isValidEmail(data.email);
+    }
+
+    function isValidTransaction(data) {
+      return data.uid is string && 
+             data.amount is number && 
+             data.type in ['income', 'expense'] && 
+             data.category is string &&
+             data.date is timestamp;
+    }
+
+    function isValidBudget(data) {
+      return data.uid is string && 
+             data.category is string && 
+             data.amount is number && data.amount >= 0 &&
+             data.month is int && data.month >= 1 && data.month <= 12 &&
+             data.year is int;
+    }
+
+    function isValidCategory(data) {
+      return data.uid is string && 
+             data.name is string && data.name.size() > 0 &&
+             data.color is string &&
+             data.type in ['income', 'expense'];
+    }
+
+    function isValidSavingsGoal(data) {
+      return data.uid is string && 
+             data.name is string && data.name.size() > 0 &&
+             data.targetAmount is number && data.targetAmount > 0 &&
+             data.currentAmount is number && data.currentAmount >= 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner() && isValidTransaction(request.resource.data);
+      allow update: if isDocOwner() && isRequestOwner() && isValidTransaction(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /budgets/{budgetId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner() && isValidBudget(request.resource.data);
+      allow update: if isDocOwner() && isRequestOwner() && isValidBudget(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner() && isValidCategory(request.resource.data);
+      allow update: if isDocOwner() && isRequestOwner() && isValidCategory(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /savingsGoals/{goalId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isRequestOwner() && isValidSavingsGoal(request.resource.data);
+      allow update: if isDocOwner() && isRequestOwner() && isValidSavingsGoal(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /{path=**}/test/connection {
+      allow read: if true;
+    }
+  }
+}
